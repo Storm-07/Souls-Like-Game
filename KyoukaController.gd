@@ -1,10 +1,9 @@
 extends CharacterBody3D
 
-@export var cam_pivot_path: NodePath = NodePath("SpringArm3D")
+@export var cam_pivot_path: NodePath = NodePath("CamPivot")
 @onready var cam_pivot: Node3D = get_node_or_null(cam_pivot_path)
 
-@export var move_speed: float = 3.8
-@export var sprint_speed: float = 9.7
+@export var move_speed: float = 5.7
 @export var dodge_cooldown: float = 0.45
 
 var input_dir: Vector2 = Vector2.ZERO
@@ -15,26 +14,23 @@ var last_move_dir: Vector2 = Vector2(0, 1)   # ⬅ NEW (fallback for dodge direc
 var can_dodge: bool = true
 var _dodge_cd_timer: float = 0.0
 
-@onready var animation_tree: AnimationTree = $Seigen_Master/AnimationTree
+@onready var animation_tree: AnimationTree = $AnimationTree
 @onready var animation_state := animation_tree.get("parameters/playback") as AnimationNodeStateMachinePlayback
-@onready var anim_player: AnimationPlayer = $Seigen_Master/AnimationPlayer
+@onready var anim_player: AnimationPlayer = $KyoukaModel_v10/AnimationPlayer
 @onready var state_machine = $States
 @onready var idle_state = $States/Idle
 @onready var walk_state = $States/Walk
 @onready var jog_state  = $States/Jog
 @onready var jump_state = $States/Jump
 @onready var fall_state = $States/Fall
-@onready var sprint_state = $States/Sprint
 @onready var dodge_state = $States/Dodge
 @onready var basic_attack1_state = $States/B_Attack1
 
-
-@onready var mesh_holder = $Seigen_Master/rig
+@onready var mesh_holder = $KyoukaModel_v10/rig
 
 # --- AnimationTree parameter paths ---
 const PATH_IDLE_WALK := "parameters/Locomotion/AnimationNodeBlendTree/IdleWalkBlend/blend_amount"
 const PATH_WALK_JOG  := "parameters/Locomotion/AnimationNodeBlendTree/WalkJogBlend/blend_amount"
-const PATH_JOG_SPRINT := "parameters/Locomotion/AnimationNodeBlendTree/JogSprintBlend/blend_amount"
 
 # Ground↔Air blend:
 const PATH_GROUND_AIR := "parameters/Locomotion/AnimationNodeBlendTree/GroundAir/blend_amount"
@@ -43,10 +39,8 @@ const PATH_GROUND_AIR := "parameters/Locomotion/AnimationNodeBlendTree/GroundAir
 
 # Damping
 const GROUND_AIR_DAMP: float = 12.0
-const JOG_SPRINT_DAMP: float = 50.0    # ⬅ moved up, was redeclared each frame
 
 var _ground_air: float = 0.0
-var _jog_sprint: float = 0.0           # ⬅ NEW: persist across frames
 
 func _ready():
 	animation_tree.active = true
@@ -57,7 +51,6 @@ func _ready():
 	jog_state.player  = self
 	jump_state.player = self
 	fall_state.player = self
-	sprint_state.player = self
 	dodge_state.player = self
 	basic_attack1_state.player = self
 	
@@ -66,7 +59,6 @@ func _ready():
 	jog_state.state_machine  = state_machine
 	jump_state.state_machine = state_machine
 	fall_state.state_machine = state_machine
-	sprint_state.state_machine = state_machine
 	dodge_state.state_machine = state_machine
 	basic_attack1_state.state_machine = state_machine
 
@@ -85,8 +77,6 @@ func update_input() -> void:
 		input_dir = Vector2.ZERO
 		raw_input_strength = 0.0
 		
-	if Input.is_action_just_pressed("sprint_toggle"):
-		sprint_toggled = !sprint_toggled
 
 func _physics_process(delta: float) -> void:
 	update_input()
@@ -121,9 +111,6 @@ func _physics_process(delta: float) -> void:
 		animation_tree.set(PATH_IDLE_WALK, idle_walk)
 	else:
 		target_js = 1.0 if sprint_toggled else 0.0
-
-	_jog_sprint = lerp(_jog_sprint, target_js, JOG_SPRINT_DAMP * delta)
-	animation_tree.set(PATH_JOG_SPRINT, _jog_sprint)
 
 	# ----- Ground ↔ Air blend -----
 	var target_air: float = 0.0 if is_on_floor() else 1.0
