@@ -18,10 +18,6 @@ func physics_process(delta):
 	if player.input_dir.length() < WALK_THRESHOLD:
 		return state_machine.switch_state(player.walk_state)
 
-	# Sprint toggle (L3) from Jog
-	if player.sprint_toggled and player.input_dir != Vector2.ZERO and player.is_on_floor():
-		return state_machine.switch_state(player.sprint_state)
-
 	# Jump
 	if Input.is_action_just_pressed("Jump"):
 		return state_machine.switch_state(player.jump_state)
@@ -38,7 +34,6 @@ func physics_process(delta):
 	var cam_basis: Basis = player.get_camera_basis()
 	var forward: Vector3 = (-cam_basis.z).normalized()
 	var right: Vector3 = cam_basis.x.normalized()
-
 
 	var move_dir: Vector3 = (right * player.input_dir.x + forward * player.input_dir.y)
 	if move_dir.length_squared() > 0.0:
