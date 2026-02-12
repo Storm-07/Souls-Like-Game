@@ -21,3 +21,5 @@ func _on_body_entered(body: Node) -> void:
 	elif body is RigidBody3D:
 		body.linear_velocity = Vector3.ZERO
 		body.angular_velocity = Vector3.ZERO
+# collision layer: 3
+# mask layer 2
