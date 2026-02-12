@@ -11,6 +11,10 @@ var jump_delay_timer := 0.0
 var jump_started := false
 
 func enter():
+	player.velocity.x = 0.0
+	player.velocity.z = 0.0
+	player.velocity.y = 0.0
+
 	jump_timer = 0.0
 	is_falling = false
 	jump_delay_timer = 0.0
@@ -21,16 +25,29 @@ func enter():
 
 
 func physics_process(delta):
-	player.update_input()
+	player.update_input(delta)
 
-	# Horizontal movement & facing
-	var cam_transform = player.get_node("SpringArm3D").global_transform.basis
-	var forward = -cam_transform.z.normalized()
-	var right = cam_transform.x.normalized()
-	var move_dir = (right * player.input_dir.x + forward * player.input_dir.y).normalized()
+	var has_input: bool = player.raw_input_strength > 0.01
 
-	player.velocity.x = move_dir.x * player.move_speed
-	player.velocity.z = move_dir.z * player.move_speed
+	var cam_basis: Basis = player.get_camera_basis()
+	var forward := -cam_basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
+
+	var right := cam_basis.x
+	right.y = 0.0
+	right = right.normalized()
+
+	var move_dir := Vector3.ZERO
+	if has_input:
+		move_dir = (right * player.input_dir.x + forward * player.input_dir.y)
+		if move_dir.length_squared() > 0.0:
+			move_dir = move_dir.normalized()
+
+	var s : float = player.move_strength
+	player.velocity.x = move_dir.x * player.move_speed * s
+	player.velocity.z = move_dir.z * player.move_speed * s
+
 
 	if move_dir.length() > 0.1:
 		var target_rotation = atan2(move_dir.x, move_dir.z)
