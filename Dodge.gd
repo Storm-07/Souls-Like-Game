@@ -1,9 +1,9 @@
 extends PlayerState
 class_name DodgeState
 
-@export var max_duration: float = 1.0          # safety cap (was duration)
-@export var target_distance: float = 50.0       # <-- main control now
-@export var start_speed: float = 12.0
+@export var max_duration: float = 1.2          # safety cap (was duration)
+@export var target_distance: float = 57.0       # <-- main control now
+@export var start_speed: float = 18.0
 @export var end_speed: float = 2.0
 @export var steer_amount: float = 0.25
 @export var min_input_for_new_dir: float = 0.15
@@ -17,10 +17,13 @@ func enter() -> void:
 	_elapsed = 0.0
 	_traveled = 0.0
 
-	player.update_input()
+	var raw := Vector2(
+	Input.get_joy_axis(0, JOY_AXIS_LEFT_X),
+	-Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
+)
 	var dir2d: Vector2 = player.input_dir
 	if dir2d.length() < min_input_for_new_dir:
-		dir2d = Vector2(0, 1)
+		dir2d = player.last_move_dir
 	_base2d = dir2d.normalized()
 
 	if player.animation_state.get_current_node() != "Dodge":
@@ -31,25 +34,42 @@ func enter() -> void:
 
 func physics_process(delta: float) -> void:
 	_elapsed += delta
+
+	# Read input early (good for dodge jump + steering + end transitions)
+	player.update_input(delta)
+
+	# Dodge jump check (early exit ONLY if triggered)
+	if player.is_on_floor() and Input.is_action_just_pressed("Jump"):
+		player.dodge_jump_dir2d = _base2d  # launch in the dodge's direction
+		state_machine.switch_state(player.dodge_jump_state)
+		return
+
 	var progress: float = 0.0
 	if target_distance > 0.0:
 		progress = clamp(_traveled / target_distance, 0.0, 1.0)
 
-	# same curve as before, but driven by distance progress
 	var eased: float = 1.0 - pow(1.0 - progress, 3.0)
 	var speed: float = lerp(start_speed, end_speed, eased)
 
-	player.update_input()
 	var steer2d: Vector2 = player.input_dir
 	if steer2d.length() < min_input_for_new_dir:
 		steer2d = _base2d
 	else:
 		steer2d = _base2d.lerp(steer2d.normalized(), steer_amount).normalized()
 
-	var cam_basis: Basis = player.get_node("SpringArm3D").global_transform.basis
-	var forward: Vector3 = (-cam_basis.z).normalized()
-	var right: Vector3 = cam_basis.x.normalized()
-	var move_dir: Vector3 = (right * steer2d.x + forward * steer2d.y).normalized()
+	var cam_basis: Basis = player.get_camera_basis()
+
+	var forward := -cam_basis.z
+	forward.y = 0.0
+	forward = forward.normalized()
+
+	var right := cam_basis.x
+	right.y = 0.0
+	right = right.normalized()
+
+	var move_dir: Vector3 = (right * steer2d.x + forward * steer2d.y)
+	if move_dir.length_squared() > 0.0:
+		move_dir = move_dir.normalized()
 
 	if not keep_gravity:
 		player.velocity.y = 0.0
@@ -63,7 +83,6 @@ func physics_process(delta: float) -> void:
 
 	_set_dodge_blend(steer2d)
 
-	# Optional: face direction (unchanged)
 	if move_dir.length() > 0.1:
 		var target_yaw: float = atan2(move_dir.x, move_dir.z)
 		player.mesh_holder.rotation.y = lerp_angle(player.mesh_holder.rotation.y, target_yaw, 10.0 * delta)
@@ -74,7 +93,6 @@ func physics_process(delta: float) -> void:
 			state_machine.switch_state(player.walk_state)
 		else:
 			state_machine.switch_state(player.idle_state)
-
 
 func _set_dodge_blend(dir2d: Vector2) -> void:
 	var paths: Array[String] = [
