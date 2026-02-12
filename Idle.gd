@@ -6,7 +6,7 @@ func enter():
 		player.animation_state.travel("Locomotion")
 
 func physics_process(delta):
-	player.update_input()
+	player.update_input(delta)
 
 	# Movement transitions
 	if player.input_dir != Vector2.ZERO:
