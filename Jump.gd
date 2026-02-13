@@ -1,10 +1,11 @@
 extends PlayerState
 
 const MAX_JUMP_TIME := 0.6
-const JUMP_SPEED := 8.0
+const JUMP_SPEED := 11.0
 const GRAVITY := -12.0
 const JUMP_DELAY := 0.0  # Delay before applying jump force
 const AIR_ACCEL := 14.0  # higher = snappier. Try 10–18 for "tiny" lag.
+const AIR_VEL := 1.4
 
 var horiz_vel: Vector3 = Vector3.ZERO
 var jump_timer := 0.0
@@ -55,16 +56,14 @@ func physics_process(delta):
 	var t := 1.0 - exp(-AIR_ACCEL * delta)
 	horiz_vel = horiz_vel.lerp(target_h, t)
 
-	player.velocity.x = horiz_vel.x
-	player.velocity.z = horiz_vel.z
+	player.velocity.x = horiz_vel.x * AIR_VEL
+	player.velocity.z = horiz_vel.z * AIR_VEL
 
 	# Rotation (optional): rotate toward move_dir OR toward horiz_vel (feels nicer midair)
 	var face_dir := horiz_vel
 	if face_dir.length() > 0.1:
 		var target_rotation = atan2(face_dir.x, face_dir.z)
 		player.mesh_holder.rotation.y = lerp_angle(player.mesh_holder.rotation.y, target_rotation, 10 * delta)
-
-	# ...keep the rest of your jump logic (delay, hold, gravity, move_and_slide, landing) unchanged
 
 
 	# Handle jump delay
