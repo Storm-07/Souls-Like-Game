@@ -4,13 +4,16 @@ const MAX_JUMP_TIME := 0.6
 const JUMP_SPEED := 8.0
 const GRAVITY := -12.0
 const JUMP_DELAY := 0.0  # Delay before applying jump force
+const AIR_ACCEL := 14.0  # higher = snappier. Try 10–18 for "tiny" lag.
 
+var horiz_vel: Vector3 = Vector3.ZERO
 var jump_timer := 0.0
 var is_falling := false
 var jump_delay_timer := 0.0
 var jump_started := false
 
 func enter():
+	horiz_vel = Vector3(player.velocity.x, 0.0, player.velocity.z)
 	player.velocity.x = 0.0
 	player.velocity.z = 0.0
 	player.velocity.y = 0.0
@@ -23,11 +26,8 @@ func enter():
 	player.velocity.y = 0  # Wait for delay before launching
 	player.animation_tree.set("parameters/Locomotion/AnimationNodeBlendTree/JumpStart/request", AnimationNodeOneShot.ONE_SHOT_REQUEST_FIRE)
 
-
 func physics_process(delta):
-	player.update_input(delta)
-
-	var has_input: bool = player.raw_input_strength > 0.01
+	# player.update_input(delta)  <-- remove this
 
 	var cam_basis: Basis = player.get_camera_basis()
 	var forward := -cam_basis.z
@@ -38,24 +38,34 @@ func physics_process(delta):
 	right.y = 0.0
 	right = right.normalized()
 
+	# Use buffered direction when input_dir is zero (this is your "movement buffer" behavior)
+	var dir2 : Vector2 = player.input_dir
+	if dir2 == Vector2.ZERO:
+		dir2 = player.last_move_dir
+
 	var move_dir := Vector3.ZERO
-	if has_input:
-		move_dir = (right * player.input_dir.x + forward * player.input_dir.y)
-		if move_dir.length_squared() > 0.0:
-			move_dir = move_dir.normalized()
+	if dir2 != Vector2.ZERO:
+		move_dir = (right * dir2.x + forward * dir2.y).normalized()
 
-	var s : float = player.move_strength
-	player.velocity.x = move_dir.x * player.move_speed * s
-	player.velocity.z = move_dir.z * player.move_speed * s
+	# Use smoothed strength (already buffered)
+	var s: float = player.move_strength
+	var target_h : Vector3 = move_dir * player.move_speed * s
 
+	# Smooth horizontal velocity toward target (this is the “tiny lag”)
+	var t := 1.0 - exp(-AIR_ACCEL * delta)
+	horiz_vel = horiz_vel.lerp(target_h, t)
 
-	if move_dir.length() > 0.1:
-		var target_rotation = atan2(move_dir.x, move_dir.z)
-		player.mesh_holder.rotation.y = lerp_angle(
-			player.mesh_holder.rotation.y,
-			target_rotation,
-			10 * delta
-		)
+	player.velocity.x = horiz_vel.x
+	player.velocity.z = horiz_vel.z
+
+	# Rotation (optional): rotate toward move_dir OR toward horiz_vel (feels nicer midair)
+	var face_dir := horiz_vel
+	if face_dir.length() > 0.1:
+		var target_rotation = atan2(face_dir.x, face_dir.z)
+		player.mesh_holder.rotation.y = lerp_angle(player.mesh_holder.rotation.y, target_rotation, 10 * delta)
+
+	# ...keep the rest of your jump logic (delay, hold, gravity, move_and_slide, landing) unchanged
+
 
 	# Handle jump delay
 	if not jump_started:
