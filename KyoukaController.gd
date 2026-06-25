@@ -1,26 +1,30 @@
 extends CharacterBody3D
+class_name Player
 
 @export var cam_pivot_path: NodePath
 @onready var cam_pivot: Node3D = get_node_or_null(cam_pivot_path) as Node3D
+@export var player_camera_path: NodePath
+@export var test_lock_target_path: NodePath
+@export var lock_on_max_distance := 130.0
 
 @export var move_speed: float = 5.7
 @export var dodge_cooldown: float = 0.45
 @export var input_deadzone: float = 0.2
-@export var input_rise_speed: float = 14.0   # accel (higher = snappier)
-@export var input_fall_speed: float = 18.0   # decel (higher = snappier)
 
-var _smoothed_dir: Vector2 = Vector2(0, 1)
-var _smoothed_strength: float = 0.0
-var input_dir: Vector2 = Vector2.ZERO
-var blend_position: Vector2 = Vector2.ZERO
-var raw_input_strength: float = 0.0
-var sprint_toggled: bool = false   # L3 toggles this
-var last_move_dir: Vector2 = Vector2(0, 1)   # ⬅ NEW (fallback for dodge direction)
+# --- Input channels (instant) ---
+var input_dir: Vector2 = Vector2.ZERO          # normalized direction (or ZERO)
+var raw_input_strength: float = 0.0            # 0..1 magnitude AFTER deadzone mapping
+var last_move_dir: Vector2 = Vector2(0, 1)     # fallback for dodge facing
+
+var sprint_toggled: bool = false   # (you can wire this elsewhere)
+
 var can_dodge: bool = true
 var _dodge_cd_timer: float = 0.0
-var dodge_jump_dir2d: Vector2 = Vector2(0, 1)
-var move_strength: float = 0.0 # smoothed 0..1
 
+var just_spawned := true
+var spawn_grace := 0.15
+
+var dodge_jump_dir2d : Vector2 = Vector2.ZERO
 
 @onready var animation_tree: AnimationTree = $AnimationTree
 @onready var animation_state := animation_tree.get("parameters/playback") as AnimationNodeStateMachinePlayback
@@ -34,23 +38,25 @@ var move_strength: float = 0.0 # smoothed 0..1
 @onready var dodge_state = $States/Dodge
 @onready var basic_attack1_state = $States/B_Attack1
 @onready var dodge_jump_state = $States/Dodge_Jump
+@onready var land_state = $States/Land
+@onready var block_state = $States/Block
+@onready var attack_state = $States/B_Attack1
+@onready var hurt_state = $States/Hurt
+@onready var parry_state = $States/Parry
 
+@onready var mesh_holder = $KyoukaModel_v10/rig # update upon reimport potentially
 
-@onready var mesh_holder = $KyoukaModel_v10/rig
+@onready var player_camera = get_node_or_null(player_camera_path)
+@onready var test_lock_target: Node3D = get_node_or_null(test_lock_target_path) as Node3D
 
 # --- AnimationTree parameter paths ---
 const PATH_IDLE_WALK := "parameters/Locomotion/AnimationNodeBlendTree/IdleWalkBlend/blend_amount"
 const PATH_WALK_JOG  := "parameters/Locomotion/AnimationNodeBlendTree/WalkJogBlend/blend_amount"
-
-# Ground↔Air blend:
 const PATH_GROUND_AIR := "parameters/Locomotion/AnimationNodeBlendTree/GroundAir/blend_amount"
-# If yours lives at root instead, swap to:
-# const PATH_GROUND_AIR := "parameters/GroundAir/blend_amount"
 
-# Damping
 const GROUND_AIR_DAMP: float = 12.0
-
 var _ground_air: float = 0.0
+var parry_active := false
 
 func _ready():
 	cam_pivot = get_node_or_null(cam_pivot_path) as Node3D
@@ -66,7 +72,12 @@ func _ready():
 	dodge_state.player = self
 	basic_attack1_state.player = self
 	dodge_jump_state.player = self
-	
+	land_state.player = self
+	block_state.player = self
+	attack_state.player = self
+	hurt_state.player = self
+	parry_state.player = self
+
 	idle_state.state_machine = state_machine
 	walk_state.state_machine = state_machine
 	jog_state.state_machine  = state_machine
@@ -75,119 +86,109 @@ func _ready():
 	dodge_state.state_machine = state_machine
 	basic_attack1_state.state_machine = state_machine
 	dodge_jump_state.state_machine = state_machine
-	
+	land_state.state_machine = state_machine
+	block_state.state_machine = state_machine
+	attack_state.state_machine = state_machine
+	hurt_state.state_machine = state_machine
+	parry_state.state_machine = state_machine
 
 	state_machine.switch_state(idle_state)
 	anim_player.animation_finished.connect(_on_animation_finished)
-	
+
+
 func _on_animation_finished(anim_name: StringName) -> void:
 	# Forward the event to the current state
-	if state_machine.current_state is AttackState:
+	if state_machine.current_state == attack_state:
 		state_machine.current_state.on_animation_finished(anim_name)
 
 
-func update_input(delta: float = 0.0) -> void:
+func update_input() -> void:
 	var raw := _read_raw_stick()
 	var mag := raw.length()
 
-	# deadzone
+	# deadzone + remap to 0..1
 	if mag < input_deadzone:
 		raw = Vector2.ZERO
 		mag = 0.0
 	else:
 		mag = clamp((mag - input_deadzone) / (1.0 - input_deadzone), 0.0, 1.0)
 
-	var target_dir := Vector2.ZERO
+	raw_input_strength = mag
+
 	if mag > 0.0:
-		target_dir = raw.normalized()
-
-	# If called without delta (e.g., from enter()), just take a snapshot:
-	if delta <= 0.0:
-		raw_input_strength = mag              # RAW (unsmoothed)
-		move_strength = mag                   # ✅ NEW: smoothed channel mirrors raw on snapshot
-		if target_dir != Vector2.ZERO:
-			_smoothed_dir = target_dir
-			last_move_dir = target_dir
-			input_dir = target_dir            # ✅ CHANGED: PURE direction
-		else:
-			input_dir = Vector2.ZERO
-		return
-
-	# Smooth strength
-	var speed := input_rise_speed if mag > _smoothed_strength else input_fall_speed
-	_smoothed_strength = lerp(_smoothed_strength, mag, 1.0 - exp(-speed * delta))
-
-	# Clamp tiny tail
-	if _smoothed_strength < 0.02:
-		_smoothed_strength = 0.0
-
-	# Smooth direction (don’t change dir when stopping)
-	if target_dir != Vector2.ZERO:
-		_smoothed_dir = _smoothed_dir.lerp(target_dir, 1.0 - exp(-input_rise_speed * delta)).normalized()
-
-	# ✅ Outputs
-	raw_input_strength = mag                # ✅ CHANGED: keep this truly raw (post-deadzone)
-	move_strength = _smoothed_strength      # ✅ NEW: smoothed 0..1 for speed/transitions
-
-	if move_strength > 0.01:
-		input_dir = _smoothed_dir            # ✅ CHANGED: PURE direction
-		last_move_dir = _smoothed_dir
+		var dir := raw.normalized()
+		input_dir = dir
+		last_move_dir = dir
 	else:
 		input_dir = Vector2.ZERO
 
 
-		
-
 func _physics_process(delta: float) -> void:
-	update_input(delta)
+	update_input()
+	
+	if Input.is_action_just_pressed("lock_on"):
+		toggle_lock_on()
+		
+	check_lock_on_distance()
+		
 	state_machine.current_state.physics_process(delta)
 
-	# Ground-only dodge; remove is_on_floor() if you want air-dodge
+	if is_locked_state():
+		move_and_slide()
+		return
+		
+	spawn_grace -= delta
+	if spawn_grace <= 0.0:
+		just_spawned = false
+
+	# Ground-only dodge
 	if can_dodge and is_on_floor() and Input.is_action_just_pressed("Dodge"):
 		state_machine.switch_state(dodge_state)
 		can_dodge = false
 		_dodge_cd_timer = dodge_cooldown
-		
-	if Input.is_action_just_pressed("B_Attack"):
-	# don't restart attack if we're already attacking
-		if state_machine.current_state is AttackState:
-			(state_machine.current_state as AttackState).buffer_attack()
-		# basic guard: only allow starting attacks from grounded + not dodging
-		elif is_on_floor() and state_machine.current_state != dodge_state and state_machine.current_state != dodge_jump_state:
-			state_machine.switch_state(basic_attack1_state)
 
+	# Attacks / attack buffering
+	if Input.is_action_just_pressed("B_Attack"):
+		if state_machine.current_state == attack_state:
+			state_machine.current_state.buffer_attack()
+		elif is_on_floor() and state_machine.current_state != dodge_state and state_machine.current_state != dodge_jump_state:
+			state_machine.switch_state(attack_state)
+			
+	# Held block
+	if is_on_floor() and Input.is_action_pressed("Block"):
+		if state_machine.current_state != parry_state \
+		and state_machine.current_state != dodge_state \
+		and state_machine.current_state != dodge_jump_state \
+		and state_machine.current_state != attack_state \
+		and state_machine.current_state != hurt_state:
+			if state_machine.current_state != block_state:
+				state_machine.switch_state(block_state)
+
+	# --- Locomotion blends (based on raw strength) ---
 	var s: float = clamp(raw_input_strength, 0.0, 1.0)
 	s = pow(s, 1.5)
+
 	var idle_walk: float = clamp(s * 2.0, 0.0, 1.0)
 	animation_tree.set(PATH_IDLE_WALK, idle_walk)
 
 	var walk_jog: float = clamp((s - 0.5) * 2.0, 0.0, 1.0)
 	animation_tree.set(PATH_WALK_JOG, walk_jog)
 
-	var target_js: float
-	if raw_input_strength <= 0.08:
-		target_js = 0.0
-		animation_tree.set(PATH_IDLE_WALK, idle_walk)
-	else:
-		target_js = 1.0 if sprint_toggled else 0.0
-
-	# ----- Ground ↔ Air blend -----
+	# --- Ground ↔ Air blend ---
 	var target_air: float = 0.0 if is_on_floor() else 1.0
 	_ground_air = lerp(_ground_air, target_air, GROUND_AIR_DAMP * delta)
 	animation_tree.set(PATH_GROUND_AIR, _ground_air)
 
-	# ----- ⬅ NEW: keep Dodge Blend2D facing the current (or last) move dir -----
-	# It’s safe to update this every frame; it only matters while the "Dodge" state is active.
 	# cooldown tick
 	if not can_dodge:
 		_dodge_cd_timer -= delta
 		if _dodge_cd_timer <= 0.0:
 			can_dodge = true
 
+
 func get_camera_basis() -> Basis:
 	var b: Basis = cam_pivot.global_transform.basis
 
-	# Flatten forward/right onto the XZ plane so camera pitch doesn't affect movement strength
 	var forward: Vector3 = -b.z
 	forward.y = 0.0
 	forward = forward.normalized()
@@ -196,14 +197,86 @@ func get_camera_basis() -> Basis:
 	right.y = 0.0
 	right = right.normalized()
 
-	# Rebuild a clean orthonormal basis (Godot bases are x=right, y=up, z=back)
 	var up: Vector3 = Vector3.UP
 	var back: Vector3 = -forward
-
 	return Basis(right, up, back)
-	
+
+
 func _read_raw_stick() -> Vector2:
 	return Vector2(
 		Input.get_joy_axis(0, JOY_AXIS_LEFT_X),
 		-Input.get_joy_axis(0, JOY_AXIS_LEFT_Y)
 	)
+
+func set_dodge_jump_dir2d(v: Vector2) -> void:
+	dodge_jump_dir2d = v
+	
+func is_block_held() -> bool:
+	return Input.is_action_pressed("Block")
+	
+func receive_hit(hit_data: Dictionary) -> void:
+	if parry_active:
+		print("PLAYER PARRIED")
+		state_machine.switch_state(parry_state)
+
+		var attacker = hit_data.get("attacker", null)
+		print("Attacker received by player: ", attacker)
+
+		if attacker != null and attacker.has_method("receive_parry"):
+			attacker.receive_parry()
+		else:
+			print("No valid attacker found for parry")
+
+		return
+
+	if state_machine.current_state == block_state:
+		print("PLAYER BLOCKED")
+		return
+
+	print("PLAYER RECEIVED DAMAGE: ", hit_data)
+	state_machine.switch_state(hurt_state)
+
+func is_locked_state() -> bool:
+	return state_machine.current_state == hurt_state \
+	or state_machine.current_state == parry_state
+	
+func toggle_lock_on() -> void:
+	var distance := global_position.distance_to(test_lock_target.global_position)
+
+	if distance > lock_on_max_distance:
+		print("Target too far to lock on")
+		return
+		
+	if player_camera == null:
+		print("No player_camera assigned")
+		return
+
+	if player_camera.lock_on_enabled:
+		player_camera.lock_on_enabled = false
+		player_camera.lock_on_target = null
+		print("LOCK OFF")
+	else:
+		if test_lock_target == null:
+			print("No test_lock_target assigned")
+			return
+
+		player_camera.lock_on_target = test_lock_target
+		player_camera.lock_on_enabled = true
+		print("LOCK ON")
+
+func check_lock_on_distance() -> void:
+	if player_camera == null:
+		return
+	
+	if not player_camera.lock_on_enabled:
+		return
+	
+	if player_camera.lock_on_target == null:
+		return
+	
+	var distance := global_position.distance_to(player_camera.lock_on_target.global_position)
+	
+	if distance > lock_on_max_distance:
+		player_camera.lock_on_enabled = false
+		player_camera.lock_on_target = null
+		print("LOCK BROKEN: target too far")
