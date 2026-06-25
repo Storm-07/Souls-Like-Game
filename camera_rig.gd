@@ -34,10 +34,3 @@ func _process(delta):
 		follow_pos.y = lerp(follow_pos.y, desired.y, recenter_lerp_speed * delta)
 
 	global_position = follow_pos
-
-# node hierarchy:
-# - CameraRig(Node3D)
-# - CamPivot (Node3D)
-# - SpringArm3D (script)
-# - Camera3D
-# all in main.tscn
