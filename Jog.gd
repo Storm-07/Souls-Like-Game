@@ -32,6 +32,7 @@ func physics_process(delta):
 		player.velocity.y = 0.0
 	else:
 		player.velocity.y -= g * delta
+		
 
 	# --- Move in camera space ---
 	# input_dir is Vector2 (x,y); we build a Vector3 move_dir from it
@@ -65,3 +66,20 @@ func physics_process(delta):
 			footstep_timer = FOOTSTEP_INTERVAL
 	else:
 		footstep_timer = 0.0
+
+	var is_moving : bool = player.is_on_floor() and move_dir.length_squared() > 0.01
+	
+	player.dust_puffs.emitting = is_moving
+	
+	if is_moving: 
+		if not player.moving:
+			player.moving = true
+			player.dust_puffs.emitting = true
+	else:
+		if player.moving:
+			player.moving = false
+			player.dust_puffs.emitting = false
+
+func exit():
+	if player.dust_puffs:
+		player.dust_puffs.emitting = false
