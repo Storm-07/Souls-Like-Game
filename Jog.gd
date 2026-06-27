@@ -1,16 +1,20 @@
 # Jog.gd
 extends PlayerState
 
+var footstep_timer := 0.0
+
 const WALK_THRESHOLD := 0.9
-const ROTATE_DAMP := 10.0
+const ROTATE_DAMP := 18.0
+const FOOTSTEP_INTERVAL := 0.38
 
 # If your SpringArm path differs, update this:
 const CAM_PATH := "../../SpringArm3D"
 
 func enter():
-	# Ensure we're in the locomotion state machine node
 	if player.animation_state.get_current_node() != "Locomotion":
 		player.animation_state.travel("Locomotion")
+
+	footstep_timer = 0.0
 
 func physics_process(delta):
 	# --- State exits ---
@@ -51,3 +55,13 @@ func physics_process(delta):
 	if move_dir.length_squared() > 0.01:
 		var target_yaw := atan2(move_dir.x, move_dir.z)  # Vector3 → yaw
 		player.mesh_holder.rotation.y = lerp_angle(player.mesh_holder.rotation.y, target_yaw, ROTATE_DAMP * delta)
+		
+	# --- Sounds ---
+	if player.is_on_floor() and move_dir.length_squared() > 0.01:
+		footstep_timer -= delta
+
+		if footstep_timer <= 0.0:
+			player.footstep_player.play_random_footstep()
+			footstep_timer = FOOTSTEP_INTERVAL
+	else:
+		footstep_timer = 0.0
