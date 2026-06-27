@@ -48,6 +48,7 @@ var dodge_jump_dir2d : Vector2 = Vector2.ZERO
 
 @onready var player_camera = get_node_or_null(player_camera_path)
 @onready var test_lock_target: Node3D = get_node_or_null(test_lock_target_path) as Node3D
+@onready var footstep_player = $FootstepPlayer
 
 # --- AnimationTree parameter paths ---
 const PATH_IDLE_WALK := "parameters/Locomotion/AnimationNodeBlendTree/IdleWalkBlend/blend_amount"
@@ -241,6 +242,10 @@ func is_locked_state() -> bool:
 	or state_machine.current_state == parry_state
 	
 func toggle_lock_on() -> void:
+	if test_lock_target == null:
+		print("No test_lock_target assigned")
+		return
+
 	var distance := global_position.distance_to(test_lock_target.global_position)
 
 	if distance > lock_on_max_distance:
@@ -252,17 +257,13 @@ func toggle_lock_on() -> void:
 		return
 
 	if player_camera.lock_on_enabled:
+		set_target_marker(player_camera.lock_on_target, false)
 		player_camera.lock_on_enabled = false
 		player_camera.lock_on_target = null
-		print("LOCK OFF")
 	else:
-		if test_lock_target == null:
-			print("No test_lock_target assigned")
-			return
-
 		player_camera.lock_on_target = test_lock_target
 		player_camera.lock_on_enabled = true
-		print("LOCK ON")
+		set_target_marker(test_lock_target, true)
 
 func check_lock_on_distance() -> void:
 	if player_camera == null:
@@ -277,6 +278,10 @@ func check_lock_on_distance() -> void:
 	var distance := global_position.distance_to(player_camera.lock_on_target.global_position)
 	
 	if distance > lock_on_max_distance:
+		set_target_marker(player_camera.lock_on_target, false)
 		player_camera.lock_on_enabled = false
 		player_camera.lock_on_target = null
-		print("LOCK BROKEN: target too far")
+
+func set_target_marker(target: Node, value: bool) -> void:
+	if target != null and target.has_method("set_lock_on_marker_visible"):
+		target.set_lock_on_marker_visible(value)
