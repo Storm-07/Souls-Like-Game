@@ -14,3 +14,8 @@ I think the next move is to continue working on my combat system. As it is curre
 
 ## Update 6/25/26
 Today I disabled the map I made in blender because it felt stale and also I haven't done any mechanical testing of movement yet so having a map isn't quite ideal. I added a few blocks and collision layers but that's it. Then I added camera lock on to the only enemy in my scene at the moment and you can toggle the camera on and off which is neat. Also it disengages automatically after being a certain distance away. It will have to be updated later to accomodate for different enemies, verticality, obstacles in the way of the camera, multiple enemies (!), etc. I added a path variable in the main player script that is responsible for the actual input and not the behavior of the camnera itself.
+
+## Update 6/26/26
+Weird looking date that is ^. I did the following today:
+- added camera lock on indicator above an enemy's head that toggles visibility on and off. Small white circle with billboard effect to maintain visibility to camera while locked on. I may need to change the position later to be more centered upon the enemy since the health and posture meter should be in this position later when I create those systems. For peon-type enemies
+- added footstep audio that randomizes 6 preloaded step noises randomly. I got the audio from freesounds.com I think. It isn't exactly synchronized to the footsteps but it's not noticeable unless you slow down, so I need to fix that.
